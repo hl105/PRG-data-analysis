@@ -7,7 +7,7 @@ import warnings
 from numpy.lib.stride_tricks import sliding_window_view
 
 
-class RollingWindowPandas():
+class SmoothingPandas():
     def __init__(self,filenum,option,bot_name):
         self.bot_name = bot_name
         self.filenum = filenum
@@ -78,7 +78,7 @@ class RollingWindowPandas():
             df_smoothed = self.rolling_window_analysis()
             self.plot_smoothed(df_smoothed)
 
-class AggRollingWindow:
+class SmoothingNumPy:
 
     def __init__(self,filenum,window_size,bot_name):
         self.bot_name = bot_name
@@ -125,7 +125,7 @@ if __name__ == '__main__':
     for bot in ["aiim001","aiim002"]:
         for i in range(1,10):
             for j in [-1,3,5]: #-1 means we do exponential smoothing, not rolling window
-                data_smoothed = RollingWindowPandas(i,j,bot)
+                data_smoothed = SmoothingPandas(i,j,bot)
                 print(f"{bot}: finished task {i} with option {j}")
                 data_smoothed.choose_smoothing_method()
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
     for bot in ["aiim001","aiim002"]:
         for i in range(1,10): #for task 1-9
             for j in [3,5]: # for rolling window size 3,5
-                data_rolling = AggRollingWindow(i,j,bot)
+                data_rolling = SmoothingNumPy(i,j,bot)
                 data_agg_features = data_rolling.add_features_per_window()
                 print(f"{bot}: check first row in task {i} with window {j}: {data_agg_features[0,:]}")
         
