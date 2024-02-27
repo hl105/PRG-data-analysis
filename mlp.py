@@ -10,6 +10,11 @@ import sys
 import os
 
 class PreProcessData():
+    """
+    preprocess files into desired shape to use in MLP
+    create tensor X of size[n,d] and y of size[n]
+    called in main()
+    """
     def __init__(self, path=""):
         self.path = sys.argv[1] # path to data folder ex)"../sample_dataset/"
         self.task = sys.argv[2] #task file: ex) "lowlevel.csv"
@@ -93,7 +98,7 @@ class PreProcessData():
     
 
 class MLP(nn.Module):
-    def __init__(self,input_size=720192,hidden_size_1=1000, hidden_size_2=400, output_size=1):
+    def __init__(self,input_size=720192,hidden_size_1=800, hidden_size_2=50, output_size=1):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(input_size, hidden_size_1),
@@ -139,7 +144,7 @@ def train(train_loader,model,loss_function, optimizer):
         optimizer.zero_grad()
 
     train_loss = total_loss/len(train_loader)
-    print(f"Average loss: {train_loss:7f}")
+    print(f"Average loss: {train_loss:5f}")
 
 def test(test_loader,model,loss_function):
     model.eval()
@@ -157,36 +162,35 @@ def test(test_loader,model,loss_function):
             test_loss += loss.item()
         
     test_loss = test_loss / len(test_loader)
-    print(f"Testset average loss: {test_loss:7f}")
+    print(f"Testset average loss: {test_loss:5f}")
 
 def main():
+    torch.manual_seed(42)
+    
     #data preprocessing
     ppd = PreProcessData()
     ppd.label_to_binary()
     ppd.tensor_labels()
     ppd.stack_task_tensors()
-
-    torch.manual_seed(42)
     X,y = ppd.X, ppd.y
     dataset = TaskData(X, y)
 
     #mlp
     train_size = 12
-    test_size = len(dataset) - train_size #18-12
+    test_size = len(dataset) - train_size #len(dataset) is 18
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    train_batch_size = 2
-    test_batch_size = 2
+    train_batch_size = 3
+    test_batch_size = 3
 
     train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model = MLP().to(device)
-
     loss_function = torch.nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
-    epochs = 5
+    epochs = 3
     for epoch in range(0,epochs):
         print(f'Entering Epoch {epoch+1}')
         train(train_loader,model,loss_function, optimizer)
