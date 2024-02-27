@@ -38,13 +38,9 @@ class PreProcessData():
         converts label (1-21) to binary values with 11 as cutoff
         saves all task labels to task_binary_label.csv
         """
-        data = {"label":[]}
-        for file in self.file_name_list(self.label):
-            label = np.load(file)
-            binary = 0 if label < 11 else 1
-            data['label'].append(binary)
-        df = pd.DataFrame(data)
-        return df
+        labels = [np.load(file) for file in self.file_name_list(self.label)]
+        binary_labels = [0 if label <11 else 1 for label in labels]
+        return  pd.DataFrame({'label':binary_labels})
     
     def tensor_labels(self):
         """
@@ -97,7 +93,7 @@ class PreProcessData():
     
 
 class MLP(nn.Module):
-    def __init__(self,input_size=720192,hidden_size_1=1000, hidden_size_2=40, output_size=1):
+    def __init__(self,input_size=720192,hidden_size_1=1000, hidden_size_2=400, output_size=1):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(input_size, hidden_size_1),
@@ -122,6 +118,46 @@ class TaskData(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
+def train(train_loader,model,loss_function, optimizer):
+    model.train()
+
+    total_loss = 0
+    for input, target in train_loader:
+        input, target = input.float(), target.float()
+        target = target.unsqueeze(1)
+        
+        optimizer.zero_grad()
+
+        output = model(input) #forward pass
+        
+        loss = loss_function(output, target)
+        total_loss += loss
+
+        #backpropagation
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    train_loss = total_loss/len(train_loader)
+    print(f"Average loss: {train_loss:7f}")
+
+def test(test_loader,model,loss_function):
+    model.eval()
+
+    test_loss = 0
+    with torch.no_grad():
+        for input,target in test_loader:
+            input, target = input.float(), target.float()
+            target = target.unsqueeze(1)
+
+            output = model(input) #forward pass
+
+            #loss
+            loss = loss_function(output, target)
+            test_loss += loss.item()
+        
+    test_loss = test_loss / len(test_loader)
+    print(f"Testset average loss: {test_loss:7f}")
 
 def main():
     #data preprocessing
@@ -135,47 +171,6 @@ def main():
     dataset = TaskData(X, y)
 
     #mlp
-    def train(train_loader,model,loss_function, optimizer):
-        model.train()
-
-        total_loss = 0
-        for input, target in train_loader:
-            input, target = input.float(), target.float()
-            target = target.unsqueeze(1)
-            
-            optimizer.zero_grad()
-
-            output = model(input) #forward pass
-            
-            loss = loss_function(output, target)
-            total_loss += loss
-
-            #backpropagation
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-        train_loss = total_loss/len(train_loader)
-        print(f"Average loss: {train_loss:7f}")
-
-    def test(test_loader,model,loss_function):
-        model.eval()
-
-        test_loss = 0
-        with torch.no_grad():
-            for input,target in test_loader:
-                input, target = input.float(), target.float()
-                target = target.unsqueeze(1)
-
-                output = model(input) #forward pass
-
-                #loss
-                loss = loss_function(output, target)
-                test_loss += loss.item()
-        
-        test_loss = test_loss / len(test_loader)
-        print(f"Testset average loss: {test_loss:7f}")
-    
     train_size = 12
     test_size = len(dataset) - train_size #18-12
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
