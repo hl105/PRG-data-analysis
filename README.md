@@ -5,5 +5,7 @@
 - epochs = 3
 ![alt text](./readme_assets./output.png)
 
-run with the following syntax:```dataset location```, ```input```, ```target```
-```python mlp.py "../sample_dataset/"  "lowlevel.csv" "mental_demand.npy"```
+run with the following syntax:```dataset location```, ```input```, ```target``` <br>
+```
+python mlp.py "../sample_dataset/"  "lowlevel.csv" "mental_demand.npy"
+```
