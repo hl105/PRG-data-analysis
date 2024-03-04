@@ -1,4 +1,10 @@
 # PRG-data-analysis
+### feature_importance
+![alt text](./readme_assets./compare_feature_importance_raw.png)
+is this meaningful though?
+
+
+### mlp
 - 3 layers
 - train_size = 12, test_size = 6
 - train_batch_size = 3, test_batch_size = 3
