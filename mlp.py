@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-#from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader, random_split
 import torch.optim as optim
 import numpy as np
@@ -8,6 +7,7 @@ from itertools import product
 import pandas as pd
 import sys
 import os
+import csv
 
 class PreProcessData():
     """
@@ -21,7 +21,7 @@ class PreProcessData():
         self.label = sys.argv[3] #file name of label ex)"mental_demand.npy"
         self.X = None
         self.y = None
-        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
 
     def file_name_list(self,target):
@@ -145,6 +145,7 @@ def train(train_loader,model,loss_function, optimizer):
 
     train_loss = total_loss/len(train_loader)
     print(f"Average loss: {train_loss:5f}")
+    return train_loss
 
 def test(test_loader,model,loss_function):
     model.eval()
@@ -163,6 +164,7 @@ def test(test_loader,model,loss_function):
         
     test_loss = test_loss / len(test_loader)
     print(f"Testset average loss: {test_loss:5f}")
+    return test_loss
 
 def main():
     torch.manual_seed(42)
@@ -175,29 +177,38 @@ def main():
     X,y = ppd.X, ppd.y
     dataset = TaskData(X, y)
 
-    #mlp
-    train_size = 12
-    test_size = len(dataset) - train_size #len(dataset) is 18
+    train_size = int(len(dataset)*0.7)
+    test_size = len(dataset) - train_size
+    print("train size:",train_size,"test size:",test_size)
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    train_batch_size = 3
-    test_batch_size = 3
+    train_batch_size = 32
+    test_batch_size = train_batch_size
 
     train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     model = MLP().to(device)
     loss_function = torch.nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     
-    epochs = 3
+    epochs = 5
+    train_losses = []
     for epoch in range(0,epochs):
         print(f'Entering Epoch {epoch+1}')
-        train(train_loader,model,loss_function, optimizer)
-
+        train_loss = train(train_loader,model,loss_function, optimizer)
+        train_loss = train_loss.cpu().item() # move to cpu
+        train_losses.append(train_loss)
+    
+    np.save('train_loss.npy',train_losses)
     print("Training has completed")
 
-    test(test_loader,model,loss_function)
+    model_path = os.path.join(os.getcwd(),"model.pth")
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved to {model_path}")
+
+    test_loss = np.array(test(test_loader,model,loss_function))
+    np.save('test_loss.npy',test_loss)
 
 
 if __name__ == '__main__':
