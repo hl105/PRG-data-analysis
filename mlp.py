@@ -9,21 +9,38 @@ import sys
 import os
 import csv
 
-class PreProcessData():
-    """
-    preprocess files into desired shape to use in MLP
-    create tensor X of size[n,d] and y of size[n]
-    called in main()
-    """
-    def __init__(self, path=""):
-        self.path = sys.argv[1] # path to data folder ex)"../sample_dataset/"
-        self.task = sys.argv[2] #task file: ex) "lowlevel.csv"
-        self.label = sys.argv[3] #file name of label ex)"mental_demand.npy"
-        self.X = None
-        self.y = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+class CognitiveDataset(Dataset):
+    def __init__(self):
+        self.folder = sys.argv[1] # path to data folder ex)"../sample_dataset/"
+        self.X_file_name = sys.argv[2] #feature file: ex) "lowlevel.csv"
+        self.y_file_name = sys.argv[3] #file name of label ex)"mental_demand.npy"
+        self.X_paths = self.file_name_list(self.X_file_name)
+        self.y_paths = self.file_name_list(self.y_file_name)
+        self.X_max_len = self.get_max_size()
+        print(f"X_max_len: {self.X_max_len}")
+    
+    def __getitem__(self,idx):
+        data_point = pd.read_csv(self.X_paths[idx]).replace([np.nan,np.inf, -np.inf], 0).values.flatten()
+        padded_data = np.zeros(self.X_max_len)
+        print(f"zero padded: {self.X_max_len-len(data_point)} values")
+        padded_data[:len(data_point)] = data_point #zero pad
+        data_point = torch.tensor(padded_data)
+        label =  0 if np.load(self.y_paths[idx]) < 11 else 1
+        label = torch.tensor(label)
+        return data_point, label
+    
+    def __len__(self):
+        return len(self.X_paths)
 
-
+    """Helper functions"""
+    def get_max_size(self):
+        max_len = 0
+        for file in self.X_paths:
+            df = pd.read_csv(file).replace([np.nan, np.inf, -np.inf], 0)
+            if len(df.values.flatten()) > max_len:
+                max_len = len(df.values.flatten())
+        return max_len
+    
     def file_name_list(self,target):
         """
         param: 
@@ -31,175 +48,91 @@ class PreProcessData():
         returns the list of files we want to find
         """
         target_files = []
-        for dirpath, _, filenames in os.walk(self.path):
+        for dirpath, _, filenames in os.walk(self.folder):
             for fN in filenames:
                 if fN.endswith(target):
                     file_path = os.path.join(dirpath, fN)
                     target_files.append(file_path)
         return sorted(target_files)
     
-    def label_to_binary(self):
-        """
-        converts label (1-21) to binary values with 11 as cutoff
-        saves all task labels to task_binary_label.csv
-        """
-        labels = [np.load(file) for file in self.file_name_list(self.label)]
-        binary_labels = [0 if label <11 else 1 for label in labels]
-        return  pd.DataFrame({'label':binary_labels})
-    
-    def tensor_labels(self):
-        """
-        creates tensor with labels
-        """
-        df =  self.label_to_binary()
-        tensor = torch.tensor(df['label'].values.flatten(),dtype=torch.float32).to(self.device)
-        self.y = tensor
-        print("\nlabel tensor size:",tensor.size())
-        return tensor
-        
-    def create_task_tensor(self,file):
-        """
-        param: task csv_file
-        replace NaN values with 0 and creates a tensor
-        """
-        df = pd.read_csv(file)
-        df = df.replace([np.nan,np.inf, -np.inf], 0)
-
-        assert not df.isnull().values.any() #check if NaN val exists
-
-        tensor = torch.tensor(df.values.flatten(),dtype=torch.float32).to(self.device)
-        #print(file, tensor.size())
-        return tensor
-    
-    def stack_task_tensors(self):
-        """
-        param: list of file names we want to use
-        zero pad tensors to maintain same length
-        aggregates tensors(flattened tasks) to a single dataset
-        """
-        tensors = []
-        max_len = 0
-        for file in self.file_name_list(self.task):
-            ts = self.create_task_tensor(file)
-            ts_size = ts.size(0)
-            tensors.append(ts)
-            if ts_size > max_len:
-                max_len = ts_size
-
-        zero_padded_tensors = []
-        for ts in tensors:
-            zero_padded_tensor = nn.functional.pad(input=ts, pad=(0,max_len-ts.size(0)))
-            zero_padded_tensors.append(zero_padded_tensor)
-
-        task_tensors = torch.stack(zero_padded_tensors)
-        print("task tensor size", task_tensors.size())
-        self.X = task_tensors
-        return task_tensors
-    
-
 class MLP(nn.Module):
-    def __init__(self,input_size=720192,hidden_size_1=800, hidden_size_2=50, output_size=1):
+    def __init__(self, input_size, hidden_size_1=50, hidden_size_2=5, output_size=1):
         super().__init__()
+        self.hidden_size_1 = hidden_size_1
+        self.hidden_size_2 = hidden_size_2
+        self.output_size = output_size
         self.layers = nn.Sequential(
-            nn.Linear(input_size, hidden_size_1),
+            nn.Linear(input_size, self.hidden_size_1),
             nn.ReLU(),
-            nn.Linear(hidden_size_1, hidden_size_2),
+            nn.Linear(self.hidden_size_1, self.hidden_size_2),
             nn.ReLU(),
-            nn.Linear(hidden_size_2,output_size),
+            nn.Linear(self.hidden_size_2, self.output_size),
             nn.Sigmoid()
         )
 
     def forward(self, x):
         return self.layers(x)
-    
-class TaskData(Dataset):
-    def __init__(self, X, y):
-        self.X = X
-        self.y = y
-    
-    def __len__(self):
-        return len(self.X)
-    
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
-
-def train(train_loader,model,loss_function, optimizer):
-    model.train()
-
-    total_loss = 0
-    for input, target in train_loader:
-        input, target = input.float(), target.float()
-        target = target.unsqueeze(1)
-        
-        optimizer.zero_grad()
-
-        output = model(input) #forward pass
-        
-        loss = loss_function(output, target)
-        total_loss += loss
-
-        #backpropagation
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-    train_loss = total_loss/len(train_loader)
-    print(f"Average loss: {train_loss:5f}")
-    return train_loss
-
-def test(test_loader,model,loss_function):
-    model.eval()
-
-    test_loss = 0
-    with torch.no_grad():
-        for input,target in test_loader:
-            input, target = input.float(), target.float()
-            target = target.unsqueeze(1)
-
-            output = model(input) #forward pass
-
-            #loss
-            loss = loss_function(output, target)
-            test_loss += loss.item()
-        
-    test_loss = test_loss / len(test_loader)
-    print(f"Testset average loss: {test_loss:5f}")
-    return test_loss
 
 def main():
+    #hyperparameters
+    batch_size = 4
+    learning_rate = 1e-4
+    epochs = 10
+
+    #fixed random seed
     torch.manual_seed(42)
     
-    #data preprocessing
-    ppd = PreProcessData()
-    ppd.label_to_binary()
-    ppd.tensor_labels()
-    ppd.stack_task_tensors()
-    X,y = ppd.X, ppd.y
-    dataset = TaskData(X, y)
+    dataset = CognitiveDataset()
 
-    train_size = int(len(dataset)*0.7)
-    test_size = len(dataset) - train_size
-    print("train size:",train_size,"test size:",test_size)
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    train_batch_size = 32
-    test_batch_size = train_batch_size
+    test_prop = 0.3
+    test_size = int(dataset.__len__() * test_prop)
+    train_set, test_set = torch.utils.data.random_split(dataset, [
+            (dataset.__len__() - (test_size)), 
+            test_size
+    ])
 
-    train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(
+            train_set,
+            batch_size=batch_size,
+            shuffle=True,
+    )
 
+    test_dataloader = torch.utils.data.DataLoader(
+                test_set,
+                batch_size=batch_size,
+                shuffle=True,
+    )
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    model = MLP().to(device)
-    loss_function = torch.nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    
-    epochs = 5
+    model = MLP(len(dataset[0][0])).to(device)
+    loss_function = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
     train_losses = []
-    for epoch in range(0,epochs):
+    for epoch in range(epochs):
         print(f'Entering Epoch {epoch+1}')
-        train_loss = train(train_loader,model,loss_function, optimizer)
-        train_loss = train_loss.cpu().item() # move to cpu
-        train_losses.append(train_loss)
-    
+        current_loss = 0.0
+
+        #iterate over data
+        for i, (input, target) in enumerate(train_dataloader):
+            input = input.float().to(device)
+            target = target.float().unsqueeze(1).to(device)
+
+            optimizer.zero_grad()
+
+            output = model(input)
+
+            loss = loss_function(output, target)
+
+            loss.backward()
+
+            optimizer.step()
+
+            #stats
+            current_loss += loss.item()
+            print(f'Loss after mini-batch {i+1}: {current_loss}')
+            current_loss = 0.0
+       
     np.save('train_loss.npy',train_losses)
     print("Training has completed")
 
@@ -207,15 +140,33 @@ def main():
     torch.save(model.state_dict(), model_path)
     print(f"Model saved to {model_path}")
 
-    test_loss = np.array(test(test_loader,model,loss_function))
+
+    """testing"""
+    model.eval()
+    test_loss = 0
+    with torch.no_grad():
+        for input,target in test_dataloader:
+            input = input.float().to(device)
+            target = target.float().unsqueeze(1).to(device)
+
+            output = model(input) #forward pass
+
+            #loss
+            loss = loss_function(output, target)
+            test_loss += loss.item()
+        
+    test_loss = test_loss / len(test_dataloader)
+    print(f"Testset loss: {test_loss:5f}")
+
+    test_loss = np.array(test_loss)
     np.save('test_loss.npy',test_loss)
 
 
 if __name__ == '__main__':
     main()
 
-
-
-
-
-
+    """
+    dataset = CognitiveDataset()
+    for i in range (len(dataset)):
+        print(dataset[i][0].shape,dataset[i][1])
+    """
